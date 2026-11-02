@@ -46,7 +46,7 @@ let source = stripTypeScriptTypes(
 );
 source = source
   .replace(
-    "import { env } from 'cloudflare:workers';",
+    "import { env } from './runtime';",
     'const env=globalThis.__careEnv;',
   )
   .replace("from './domain'", `from '${domainURL}'`);

@@ -2099,3 +2099,46 @@ details pre {
   background: #eee;
   color: #999;
 }
+
+.login-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 36px;
+}
+.login-card h1 {
+  font-size: 32px;
+  margin: 20px 0 12px;
+}
+.login-card p {
+  margin: 16px 0;
+  line-height: 1.6;
+}
+.login-card form {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0;
+}
+.login-card input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+}
+.login-card button {
+  margin-top: 8px;
+  justify-content: center;
+}
+.login-card small {
+  line-height: 1.6;
+  color: #607568;
+}

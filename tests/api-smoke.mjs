@@ -1,10 +1,35 @@
 ﻿import assert from 'node:assert/strict';
-const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:5173';
+import { createServerClient } from '@supabase/ssr';
+const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:3000';
 assert.ok(
   /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base),
   'Smoke tests only run against a local preview.',
 );
-const headers = { Cookie: '__sites_local_auth=1', Origin: base };
+assert.ok(
+  process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD,
+  'Configure a dedicated smoke-test account.',
+);
+const jar = new Map();
+const auth = createServerClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    cookies: {
+      getAll: () => [...jar].map(([name, value]) => ({ name, value })),
+      setAll: (values) =>
+        values.forEach(({ name, value }) => jar.set(name, value)),
+    },
+  },
+);
+const { error: signInError } = await auth.auth.signInWithPassword({
+  email: process.env.SMOKE_EMAIL,
+  password: process.env.SMOKE_PASSWORD,
+});
+assert.ifError(signInError);
+const headers = {
+  Cookie: [...jar].map(([name, value]) => `${name}=${value}`).join('; '),
+  Origin: base,
+};
 async function request(path, body) {
   const r = await fetch(base + '/api/' + path, {
     headers: {
@@ -27,8 +52,12 @@ assert.equal(
   401,
   'Unauthenticated reads rejected',
 );
-const state = await request('state');
+let state = await request('state');
 assert.equal(state.status, 200);
+if (!state.body.patients.length) {
+  assert.equal((await request('seed', {})).status, 200);
+  state = await request('state');
+}
 assert.equal(state.body.patients.length, 10);
 const patient = state.body.patients[0];
 assert.equal(

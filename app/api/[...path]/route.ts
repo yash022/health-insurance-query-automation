@@ -1,5 +1,5 @@
-import { env } from 'cloudflare:workers';
-import { getChatGPTUser } from '../../chatgpt-auth';
+import { env } from '../../../lib/runtime';
+import { getUser } from '../../../lib/auth';
 import {
   audit,
   drain,
@@ -17,9 +17,11 @@ import {
 } from '../../../lib/server';
 import { categories, classify } from '../../../lib/domain';
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 async function handle(req: Request) {
   try {
-    const user = await getChatGPTUser();
+    const user = await getUser();
     if (!user)
       return Response.json(
         { error: 'Sign in to access this patient locker.' },
@@ -35,11 +37,6 @@ async function handle(req: Request) {
       );
     if (req.method === 'GET') {
       if (path === 'state') {
-        if (
-          !(await list(owner, 'patient')).length &&
-          !(await list(owner, 'audit')).length
-        )
-          await seed(owner);
         const [patients, documents, queries, outbox, events, config] =
           await Promise.all([
             list(owner, 'patient'),
@@ -72,13 +69,12 @@ async function handle(req: Request) {
           record = await get(owner, id, 'query');
         }
         if (!record.key) throw new Error('This example has no attached file.');
-        const obj = await (env as any).BUCKET.get(record.key);
-        if (!obj) throw new Error('File not found.');
+        const location = await env.BUCKET.signDownload(record.key, record.name);
         await audit(owner, `Downloaded ${record.name}`, record.patient);
-        return new Response(obj.body, {
+        return new Response(null, {
+          status: 302,
           headers: {
-            'Content-Type': 'application/octet-stream',
-            'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(record.name)}`,
+            Location: location,
             'Cache-Control': 'no-store',
             'X-Content-Type-Options': 'nosniff',
           },
@@ -86,6 +82,14 @@ async function handle(req: Request) {
       }
     }
     if (req.method === 'POST') {
+      if (path === 'upload-url') {
+        const body = await req.json();
+        const patient = await get(owner, String(body.patient), 'patient');
+        const key = `${owner}/${patient.id}/${uid()}`;
+        return Response.json(await env.BUCKET.signUpload(key), {
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      }
       if (path === 'seed') {
         await seed(owner);
         return Response.json({ ok: true });
@@ -94,7 +98,23 @@ async function handle(req: Request) {
         const form = await req.formData(),
           patient = await get(owner, String(form.get('patient')), 'patient'),
           kind = form.get('kind') === 'query' ? 'query' : 'document';
-        const file = form.get('file') as File | null;
+        let file = form.get('file') as File | null;
+        const uploadedKey = String(form.get('storageKey') || '');
+        if (uploadedKey) {
+          const prefix = `${owner}/${patient.id}/`;
+          if (
+            !uploadedKey.startsWith(prefix) ||
+            !/^[a-f0-9-]{36}$/.test(uploadedKey.slice(prefix.length))
+          ) {
+            throw new Error('Invalid upload reference.');
+          }
+          const object = await env.BUCKET.get(uploadedKey);
+          if (!object) throw new Error('Uploaded file not found.');
+          file = new File(
+            [await object.arrayBuffer()],
+            String(form.get('name') || ''),
+          );
+        }
         const manual = String(form.get('text') || '').trim();
         if (!file && !manual) throw new Error('Choose a file or paste text.');
         if (file && file.size > 10 * 1024 * 1024)
@@ -124,8 +144,8 @@ async function handle(req: Request) {
         );
         if (duplicate)
           return Response.json({ ok: true, duplicate: true, id: duplicate.id });
-        const key = `${owner}/${patient.id}/${id}`;
-        await (env as any).BUCKET.put(key, bytes);
+        const key = uploadedKey || `${owner}/${patient.id}/${id}`;
+        if (!uploadedKey) await env.BUCKET.put(key, bytes);
         let text = manual,
           error = null;
         if (!text && file) {

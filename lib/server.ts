@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:workers';
+import { env } from './runtime';
 import { Buffer } from 'node:buffer';
 import {
   defaultTemplate,
@@ -8,7 +8,7 @@ import {
 } from './domain';
 import type { DocumentRecord, Point } from './domain';
 const E = () => env as any;
-const db = () => E().DB as D1Database;
+const db = () => env.DB;
 export const now = () => new Date().toISOString();
 export const uid = () => crypto.randomUUID();
 export async function list(owner: string, kind: string, patient?: string) {
@@ -300,7 +300,11 @@ export async function messages(owner: string) {
     next: r.next,
   }));
 }
-export async function drain(owner?: string, query?: string) {
+export async function drain(
+  owner?: string,
+  query?: string,
+  deadline = Date.now() + 60000,
+) {
   const result = await db()
     .prepare(
       "SELECT * FROM jobs WHERE status IN ('queued','blocked','retry') AND next<=?" +
@@ -311,6 +315,7 @@ export async function drain(owner?: string, query?: string) {
     .bind(...[Date.now(), ...(owner ? [owner] : []), ...(query ? [query] : [])])
     .all();
   for (const row of result.results as any[]) {
+    if (Date.now() > deadline - 16000) break;
     const e = E(),
       data = JSON.parse(row.data),
       ready = integrationStatus()[row.channel as 'email' | 'whatsapp'];
@@ -442,19 +447,25 @@ export async function drain(owner?: string, query?: string) {
     }
   }
 }
-export async function refreshDelivery(owner: string) {
+export async function refreshDelivery(
+  owner: string,
+  deadline = Date.now() + 60000,
+) {
   const rows = await messages(owner);
   const e = E();
   for (const m of rows.filter((m) => m.status === 'accepted').slice(0, 20)) {
+    if (Date.now() > deadline - 6000) break;
     try {
       const response =
         m.channel === 'email'
           ? await fetch(`https://api.resend.com/emails/${m.providerId}`, {
+              signal: AbortSignal.timeout(5000),
               headers: { Authorization: `Bearer ${e.RESEND_API_KEY}` },
             })
           : await fetch(
               `https://api.twilio.com/2010-04-01/Accounts/${e.TWILIO_ACCOUNT_SID}/Messages/${m.providerId}.json`,
               {
+                signal: AbortSignal.timeout(5000),
                 headers: {
                   Authorization: `Basic ${btoa(e.TWILIO_ACCOUNT_SID + ':' + e.TWILIO_AUTH_TOKEN)}`,
                 },
@@ -498,6 +509,7 @@ export async function refreshDelivery(owner: string) {
   }
 }
 export async function tick() {
+  const deadline = Date.now() + 250000;
   // A worker may stop after provider acceptance but before persistence. Never blindly replay these messages.
   await db()
     .prepare(
@@ -508,7 +520,7 @@ export async function tick() {
   if (E().GEMINI_API_KEY) {
     const pending = await db()
       .prepare(
-        "SELECT * FROM records WHERE kind='query' AND (json_extract(data,'$.status')='awaiting_setup' OR (json_extract(data,'$.status')='processing' AND created<?)) LIMIT 3",
+        "SELECT * FROM records WHERE kind='query' AND (json_extract(data,'$.status')='awaiting_setup' OR (json_extract(data,'$.status')='processing' AND created<?)) LIMIT 1",
       )
       .bind(new Date(Date.now() - 300000).toISOString())
       .all();
@@ -528,11 +540,12 @@ export async function tick() {
         });
     }
   }
-  await drain();
+  await drain(undefined, undefined, deadline);
   const owners = await db()
     .prepare("SELECT DISTINCT owner FROM jobs WHERE status='accepted' LIMIT 10")
     .all();
-  for (const row of owners.results as any[]) await refreshDelivery(row.owner);
+  for (const row of owners.results as any[])
+    await refreshDelivery(row.owner, deadline);
 }
 export async function seed(owner: string) {
   if ((await list(owner, 'patient')).length)

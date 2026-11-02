@@ -1,116 +1,102 @@
 # Care.fi Patient Locker
 
-A patient document workspace for reviewing insurer queries, finding supporting evidence, and requesting missing documents through email and WhatsApp.
+A private workspace for patient documents, insurer query analysis, and patient follow-up through email and WhatsApp.
 
 ## Features
 
-- Account-scoped patient profiles, claim details, document uploads, downloads, and archiving.
-- Gemini-powered extraction and query matching with document evidence.
-- Separate results for available, missing, and uncertain information.
-- Configurable messages, consent checks, independent delivery jobs, and bounded retries.
-- Query history, delivery status, duplicate detection, and activity logs.
-- Evaluation workspace with 10 fictional patients, 35 text documents, and four labeled sample analyses.
+- Patient profiles, claim-scoped documents, private downloads, and archiving.
+- PDF/image extraction and evidence-based query matching with Gemini.
+- Clear available, missing, and review-required results for each insurer request.
+- Configurable messages, consent checks, independent email/WhatsApp jobs, and bounded retries.
+- Duplicate detection, query history, delivery status, and activity logs.
+- Optional fictional workspace: 10 patients, 35 documents, and four labeled sample analyses.
 
 ## Stack
 
-| Layer          | Technology                                            |
-| -------------- | ----------------------------------------------------- |
-| Interface      | React 19, TypeScript, Tailwind CSS 4, Lucide          |
-| Application    | Next.js App Router conventions, Vinext, Vite          |
-| Runtime        | Cloudflare Workers / Sites                            |
-| Storage        | Cloudflare D1, Drizzle migrations, private R2 objects |
-| Authentication | Sites-managed ChatGPT sign-in                         |
-| Integrations   | Gemini, Resend, Twilio WhatsApp                       |
+| Layer              | Technology                                     |
+| ------------------ | ---------------------------------------------- |
+| Application        | Next.js 16 App Router, React 19, TypeScript    |
+| Interface          | Tailwind CSS 4, Lucide, reusable UI components |
+| Database           | Turso/libSQL, Drizzle migrations               |
+| Identity and files | Supabase Auth, private Supabase Storage        |
+| Hosting            | Vercel Node.js Functions and Cron              |
+| Providers          | Gemini, Resend, Twilio WhatsApp                |
 
-## Run locally
+## Quick start
 
-Use **Node.js 24** and npm. Run commands from this directory.
+Requires **Node.js 24**, a Turso database, and a Supabase project.
 
-```sh
-npm ci
-npm run build
-```
+1. Install dependencies: `npm ci`.
+2. Copy `.env.example` to `.env.local` and configure the database and Supabase variables below.
+3. Run `npm run db:migrate` and `npm run storage:setup`.
+4. In Supabase Authentication, disable public sign-ups and create a confirmed email/password user for the evaluator. Set the project's Site URL to your app URL.
+5. Run `npm run dev`, open `http://localhost:3000`, and sign in.
+6. Choose **Load sample workspace** from the empty dashboard, or add a patient.
 
-Apply each migration once to the local database:
+There is no default password or authentication bypass. Each Supabase user gets an isolated workspace. For local database development, `TURSO_DATABASE_URL=file:local.db` also works; Vercel requires a remote database.
 
-```sh
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_white_doctor_doom.sql
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_amusing_spacker_dave.sql
-npm run dev
-```
+## Configuration
 
-Open the printed URL (normally `http://localhost:5173`), then visit `/signin-with-chatgpt?return_to=/`. Portable development provides a loopback-only test identity. The first authenticated visit loads fictional sample records.
-
-## Environment
-
-Copy `.dev.vars.example` to `.dev.vars`, configure the services you want to evaluate, and restart the server. Never commit credentials.
-
-| Variables                                                         | Purpose                                                           |
+| Variable                                                          | Purpose                                                           |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `GEMINI_API_KEY`, `GEMINI_MODEL`                                  | Extraction and semantic query analysis                            |
-| `RESEND_API_KEY`, `EMAIL_FROM`                                    | Email from a verified sender                                      |
+| `TURSO_DATABASE_URL`                                              | Remote libSQL database URL                                        |
+| `TURSO_AUTH_TOKEN`                                                | Server-side database token                                        |
+| `NEXT_PUBLIC_SUPABASE_URL`                                        | Supabase project URL                                              |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`                                   | Public Supabase anon key for authentication and signed uploads    |
+| `SUPABASE_SERVICE_ROLE_KEY`                                       | Server-only storage access; never expose in client variables      |
+| `SUPABASE_STORAGE_BUCKET`                                         | Private bucket name; defaults to `patient-documents`              |
+| `CRON_SECRET`                                                     | Random server-only scheduler secret; use at least 32 random bytes |
+| `GEMINI_API_KEY`, `GEMINI_MODEL`                                  | Document extraction and semantic analysis                         |
+| `RESEND_API_KEY`, `EMAIL_FROM`                                    | Email delivery from a verified sender                             |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | WhatsApp delivery                                                 |
 | `TWILIO_CONTENT_SID`                                              | Optional approved WhatsApp template                               |
 | `TEST_EMAIL`, `TEST_WHATSAPP`                                     | Evaluation recipients; required for fictional profiles            |
-| `CRON_SECRET`                                                     | Authentication for an externally configured maintenance scheduler |
 
-Without credentials, the workspace reports setup requirements instead of simulating successful analysis or delivery. TXT extraction works without Gemini; PDF/image extraction requires it.
+Provider credentials are optional for browsing. Without Gemini, analysis is marked as requiring setup; missing delivery credentials block jobs rather than simulating success. TXT extraction works without Gemini.
 
-## Evaluation
+## Deploy on Vercel
 
-1. Inspect a sample patient and the existing documents.
-2. Configure providers and your test destinations.
-3. Upload an insurer query or paste its text.
-4. Review every request and its evidence in Query history.
-5. Inspect both jobs in Messages; provider acceptance and confirmed delivery are separate states.
-6. Upload the same query again to verify duplicate detection.
+1. Import [yash022/care.fi](https://github.com/yash022/care.fi). Select the repository root and Node.js 24. `vercel.json` supplies the Next.js build configuration.
+2. Add the environment variables to the intended deployment environment. Use separate database/storage projects for isolated previews.
+3. Run database migrations and storage setup from a trusted local terminal with that environment's credentials. They are intentionally not part of every preview build.
+4. Deploy, set the Supabase Site URL to the deployed URL, and sign in with the provisioned account.
+5. Verify document upload/download, query processing, and delivery with your evaluation destinations.
 
-See [PRODUCT.md](PRODUCT.md) for provider setup, retries, access boundaries, and the detailed walkthrough.
+The configured daily cron is compatible with Hobby scheduling. For timely unattended retries, use a plan that supports more frequent cron runs and change the schedule, or configure a trusted external scheduler for `/api/cron` with `Authorization: Bearer <CRON_SECRET>`. The portal also exposes **Refresh delivery**.
+
+Files up to 10 MB upload directly to private storage using server-authorized signed URLs, avoiding Vercel's request-body limit. Downloads authorize account ownership before issuing a 60-second signed link. Keep the bucket private and do not add public storage policies.
 
 ## Commands
 
-| Command               | Purpose                                            |
-| --------------------- | -------------------------------------------------- |
-| `npm run dev`         | Start development with local Cloudflare bindings   |
-| `npm run build`       | Build the Worker application                       |
-| `npm start`           | Preview the built Worker locally                   |
-| `npm test`            | Run domain and mocked-provider tests               |
-| `npm run typecheck`   | Check TypeScript                                   |
-| `npm run format`      | Format application code and documentation          |
-| `npm run check`       | TypeScript, tests, and formatting                  |
-| `npm run lint`        | ESLint; existing loose types still produce errors  |
-| `npm run test:smoke`  | Exercise the running local API with synthetic data |
-| `npm run db:generate` | Generate migrations                                |
+| Command                       | Purpose                                                          |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `npm run dev`                 | Start Next.js development                                        |
+| `npm run build` / `npm start` | Build / run the production application                           |
+| `npm run db:migrate`          | Apply pending database migrations                                |
+| `npm run storage:setup`       | Create/update the private bucket with a 10 MB limit              |
+| `npm test`                    | Run domain, provider, database, and API regression tests         |
+| `npm run check`               | TypeScript, tests, and formatting checks                         |
+| `npm run test:smoke`          | Test a running local app using a dedicated Supabase test account |
+| `npm run format`              | Format authored source and documentation                         |
+| `npm run lint`                | ESLint; pre-existing loose-type errors remain                    |
 
-GitHub Actions runs checks and the Worker build on pushes and pull requests. Provider tests use in-memory SQLite and mocked requests; they do not send messages. The API smoke test requires a freshly initialized sample workspace without provider credentials.
-
-## Deployment
-
-### Cloudflare / Sites
-
-The complete application currently targets Cloudflare Workers. `.openai/hosting.json` declares `DB` and `BUCKET`. Use the existing Sites workflow, apply migrations, configure server-side secrets, and retain private access. Local data is not deployed.
-
-### Vercel configuration: migration pending
-
-`vercel.json` supplies the Next.js preset, direct `next build`, and locked npm installation. This prepares configuration for a native migration; **the current Cloudflare application cannot deploy directly to Vercel**.
-
-Before deploying, replace the `cloudflare:workers` database/storage bindings with Vercel-compatible access, replace Sites-injected identity with verified sessions, and port scheduled maintenance. Client-supplied identity headers must not be trusted on a standalone deployment. Use the repository root as the Vercel Root Directory.
-
-Reference: [Vercel project configuration](https://vercel.com/docs/project-configuration/vercel-json).
+GitHub Actions runs `check` and the native Next.js build. Automated provider tests mock external delivery. The authenticated smoke test requires `SMOKE_EMAIL` and `SMOKE_PASSWORD`, a dedicated sample workspace, and unconfigured delivery/analysis providers.
 
 ## Structure
 
 ```text
-app/                  Pages, portal UI, API handlers
-components/ui/        Reusable UI components
-lib/domain.ts         Classification, evidence validation, message rendering
-lib/server.ts         Persistence, analysis, delivery orchestration
-db/                   Database schema and Drizzle adapter
-drizzle/              SQL migrations
-worker/               Worker entry point and maintenance
-scripts/              Runtime and build tooling
-tests/                Domain, provider, and API checks
-public/               Static assets
+app/                 Login, portal UI, API handlers, cron endpoint
+components/ui/       Reusable UI components
+lib/auth.ts          Server-verified Supabase identity
+lib/database.ts      Prepared-query adapter for libSQL
+lib/storage.ts       Private storage and signed URLs
+lib/domain.ts        Classification, evidence validation, message rendering
+lib/server.ts        Analysis, records, and delivery orchestration
+db/ + drizzle/       Schema and versioned migrations
+scripts/             Database and storage setup
+tests/               Domain, provider, API, and database checks
 ```
 
-Original files are private, access is account-scoped, and real patient messages require consent. Sample analyses are curated examples. Real provider delivery requires verification with configured credentials; this project does not claim production certification.
+See [PRODUCT.md](PRODUCT.md) for evaluation, runtime behavior, and existing-data migration notes.
+
+References: [Supabase SSR](https://supabase.com/docs/guides/auth/server-side), [Turso TypeScript SDK](https://docs.turso.tech/sdk/ts/reference), [Vercel limits](https://vercel.com/docs/functions/limitations), [Vercel Cron](https://vercel.com/docs/cron-jobs/manage-cron-jobs).

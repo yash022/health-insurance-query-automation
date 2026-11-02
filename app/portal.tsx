@@ -1,5 +1,6 @@
 ﻿'use client';
 import { useEffect, useState, useRef } from 'react';
+import { createBrowserAuthClient } from '../lib/supabase/browser';
 import {
   Activity,
   ArrowDownToLine,
@@ -295,8 +296,33 @@ export default function Portal() {
     f.set('kind', uploadKind);
     f.set('category', category);
     f.set('scope', scope);
-    if (file) f.set('file', file);
-    else f.set('text', queryText);
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Maximum upload size is 10 MB.');
+        return;
+      }
+      setBusy(true);
+      setError('');
+      try {
+        const response = await fetch('/api/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient: chosenPatient }),
+        });
+        const signed = await response.json();
+        if (!response.ok) throw new Error(signed.error);
+        const { error } = await createBrowserAuthClient()
+          .storage.from(signed.bucket)
+          .uploadToSignedUrl(signed.key, signed.token, file);
+        if (error) throw error;
+        f.set('storageKey', signed.key);
+        f.set('name', file.name);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Upload failed.');
+        setBusy(false);
+        return;
+      }
+    } else f.set('text', queryText);
     if (
       await action(
         'upload',
@@ -483,13 +509,11 @@ export default function Portal() {
               <strong>{data.user.name || 'Care team'}</strong>
               <small>Workspace owner</small>
             </div>
-            <a
-              href="/signout-with-chatgpt?return_to=/"
-              target="_top"
-              aria-label="Sign out"
-            >
-              <LogOut size={16} />
-            </a>
+            <form action="/auth/signout" method="post">
+              <button className="icon-btn" aria-label="Sign out">
+                <LogOut size={16} />
+              </button>
+            </form>
           </div>
         </div>
       </aside>

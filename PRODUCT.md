@@ -1,78 +1,63 @@
-# Care.fi Patient Locker
+# Product and operations guide
 
-An account-private patient document portal with persistent Cloudflare D1 records, R2 originals, query extraction and evidence-based matching, configurable patient messages, and independent WhatsApp/email delivery jobs.
+## Evaluation walkthrough
 
-## Start locally
+1. Follow the setup instructions in [README.md](README.md), then sign in with a provisioned Supabase account.
+2. Load the fictional workspace explicitly. The 10 profiles, 35 text documents, and four sample analyses are examples, not live model output.
+3. Configure Gemini and your communication providers. Set `TEST_EMAIL` and `TEST_WHATSAPP` to your actual evaluation destinations; fictional profiles cannot send without overrides.
+4. Open a patient and inspect/download existing documents. Add documents before the query letter. Supported formats: PDF, PNG, JPEG, WEBP, and TXT, up to 10 MB per file.
+5. Upload a new query letter or paste text. The pipeline extracts the requests, checks claim-scoped documents and patient-wide policy/identity records, validates evidence, and renders the message template.
+6. Review each result in Query history. Available results must cite readable, authorized documents and quote their actual text. Ambiguous results remain in review and do not auto-send.
+7. Inspect Messages. Email and WhatsApp have independent outcomes. Provider acceptance is not confirmed delivery.
+8. Upload the same query again. Duplicate fingerprints return the existing record instead of creating another message pair.
+9. Adjust the template in Settings. Required placeholders: `{{patient_name}}` and `{{requests}}`. Optional placeholders: `{{patient_id}}`, `{{claim_id}}`, `{{insurer}}`, `{{available}}`.
 
-Requires Node 24 (tests use built-in TypeScript stripping and SQLite) and npm.
+## Authentication and private files
 
-```powershell
-npm ci
-npm run build
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_white_doctor_doom.sql
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_amusing_spacker_dave.sql
-npm run dev
-```
+The app uses Supabase email/password sessions and verifies users on the server. No identity is accepted from client-supplied user headers. Disable public sign-ups in Supabase and provision accounts explicitly. Supabase handles password verification and authentication rate limits. Password recovery and self-service account administration are not implemented in this UI.
 
-Apply each local migration once. Open the printed URL and sign in using `/signin-with-chatgpt?return_to=/`. The starter provides a loopback-only mock identity in development. Hosted sign-in is handled by Sites; never expose the development server to the internet. Local and hosted records are separate.
+Every record lookup is scoped to the verified user ID. Writes require a same-origin Origin header. This is an account-private workspace, not a shared clinical team or patient self-service product.
 
-The first visit creates 10 clearly fictional profiles, 35 text documents and four curated sample analyses. The sample analyses are labeled and never claim to be live AI results. Actual uploads always run the processing pipeline. Sample records cannot send to their example addresses; TEST_EMAIL/TEST_WHATSAPP overrides are required.
+Upload authorization first checks ownership of the selected patient, then issues a signed URL for a random object key inside that user's patient prefix. The browser uploads directly to Supabase. The processing endpoint rechecks ownership, object path, extension, and file size. Storage setup enforces the bucket's 10 MB limit. Files are immutable through the app's signed-upload flow.
 
-## Enable real processing
+Downloads check record ownership before issuing a short-lived signed URL. A recipient holding that URL can use it until it expires. Never make the bucket public or add permissive storage policies. The service-role key remains server-only.
 
-Copy `.dev.vars.example` to `.dev.vars` for local development. For hosting, set the same keys as server-side Site environment variables. Secrets are never exposed by `/api/state` or stored in browser storage. Restart local development after changing environment variables.
+## Analysis and delivery
 
-| Service             | Required configuration                                      | Behavior                                                                                                                                                                                                                      |
-| ------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gemini              | GEMINI_API_KEY; optional GEMINI_MODEL                       | Transcribes PDFs/images, decomposes all requests, and compares actual document text. TXT uploads are extracted without an external provider.                                                                                  |
-| Resend              | RESEND_API_KEY, EMAIL_FROM                                  | Sends plain-text email; sender must be verified by the provider. Uses a stable per-job idempotency key.                                                                                                                       |
-| Twilio              | TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM | Sends WhatsApp messages through the Messages API. Sandbox recipients must first join your sandbox.                                                                                                                            |
-| WhatsApp template   | TWILIO_CONTENT_SID                                          | Optional approved template with variable `1` containing the rendered message. Configure an approved template for business-initiated messages outside the customer-service window; WhatsApp/provider restrictions still apply. |
-| Evaluation contacts | TEST_EMAIL, TEST_WHATSAPP                                   | Override destinations with your actual test inbox and joined/approved WhatsApp number. Phone numbers must be E.164, e.g. +919876543210.                                                                                       |
-| Scheduler           | CRON_SECRET                                                 | Authenticates the maintenance endpoint described below.                                                                                                                                                                       |
+PDFs/images are sent to Gemini for extraction when configured. Extracted text and query content are sent for matching. Uploaded instructions are treated as document data. Exact evidence validation reduces unsupported matches, but does not establish clinical correctness.
 
-Without Gemini, the app shows conservative candidate matching and `Analysis setup needed`; it does not send guessed requests. Without delivery credentials, jobs remain blocked with the specific reason. These are setup states, not simulated success.
+Without Gemini, conservative candidate matching produces an analysis-setup state and never silently marks documents missing or sends guessed requests. TXT content can be extracted without Gemini.
 
-Record patient communication consent in the profile before sending from real patient records. The configured test destinations are used only when their environment variables are present. Existing job recipients are snapshotted; use the explicit retry action after changing a contact or test override.
+Resend requires a verified sender. Twilio sandbox recipients must join the sandbox. Business-initiated WhatsApp messages may require an approved template; `TWILIO_CONTENT_SID` uses variable `1` for the rendered message. Provider restrictions still apply.
 
-### Unattended retries and recovery
+Real patient communication requires recorded consent. Test destinations override the profile destinations when present. Job recipients are snapshotted; use the explicit retry action after correcting contacts or changing test overrides.
 
-The initial upload request processes analysis and both delivery channels automatically; no send button is required. Jobs and query state persist before provider calls. Retryable rejections receive exponential backoff and stop after five attempts. Accepted messages are not resent. A network timeout on WhatsApp is marked uncertain because Twilio may have accepted it; verify the provider console instead of blindly retrying.
+## Retries and scheduling
 
-For retries while no one has the portal open, configure a trusted scheduler to POST to `/internal/tick` once per minute with `Authorization: Bearer <CRON_SECRET>`. Private Sites also require their platform service-access header (`OAI-Sites-Authorization`) at the dispatch boundary. Never expose either credential in browser code or a public URL. The Worker additionally exports a `scheduled` handler if deployed to an environment with native Cron Triggers. Merely setting CRON_SECRET does not provision a schedule.
+The initial query request attempts analysis and both delivery channels. Jobs persist before provider submission. Retryable failures back off exponentially and stop after five attempts. Accepted messages are not resent.
 
-The maintenance task retries due jobs, polls accepted messages for delivery confirmation, resumes queries awaiting provider setup, and recovers processing queries older than five minutes. The portal's Refresh delivery button also polls provider status and drains due message jobs. External scheduling is not provisioned by this repository.
+A lost WhatsApp acknowledgment is marked uncertain because the provider may already have accepted the message. Inspect the provider console before any manual remediation. Stale sending jobs are also marked uncertain.
 
-## Evaluator walkthrough
+`/api/cron` accepts GET or POST with `Authorization: Bearer <CRON_SECRET>`. It awaits its work inside the Vercel Function, resumes at most one pending/stale query per invocation, drains due jobs within a time budget, and polls delivery confirmations. Functions have a 300-second configured maximum duration. Remaining work waits for the next invocation or an explicit UI action.
 
-1. Configure the three providers and TEST_EMAIL / TEST_WHATSAPP. Join the Twilio sandbox from the evaluation number, or configure an approved WhatsApp sender and content template.
-2. Open a sample patient and inspect/download the original documents. Add a real evaluation patient if desired; record consent and both contacts.
-3. Upload patient documents before uploading the insurer query. PDF, PNG, JPEG, WEBP and TXT are supported up to 10 MB each. Image/PDF extraction requires Gemini.
-4. Upload a never-seen query letter or paste its text. The server extracts every point, checks claim-scoped documents and patient-wide policy/identity records, validates evidence citations, renders the configured template, and submits both channels when the analysis is unambiguous.
-5. Inspect Query history: every point has a result, reason and evidence where present. An available result must quote actual document text and reference an authorized, readable document.
-6. Inspect Messages: `Provider accepted` means the provider accepted submission; `Delivered` appears only after provider confirmation. Each channel can fail independently and retains its error and attempts.
-7. Upload the identical query again: the duplicate fingerprint returns the existing record and does not create another send job. Simultaneous duplicate inserts are also constrained by a database unique index.
-8. Edit Settings → Patient message template to match the supplied assignment template. Required placeholders are `{{patient_name}}` and `{{requests}}`; optional placeholders are shown in the UI.
+The included cron runs once daily. This does not guarantee minute-level retries; configure a more frequent supported schedule for that behavior. If Vercel Deployment Protection is enabled, an external scheduler also needs the platform's approved protection-bypass mechanism. Do not put scheduler secrets in public URLs or client code.
 
-## Access and data handling
+## Existing Cloudflare data
 
-- Every patient, document, query, message and audit lookup is scoped to the authenticated user ID. File downloads authorize against metadata before reading R2. All query inputs and provider results are rendered as text, not HTML.
-- Write APIs require a same-origin Origin header. The production private Site adds its own sign-in/access boundary. Keep the Site private. This version provides isolated account workspaces, not shared clinical team roles or patient self-service accounts.
-- Original files are private objects; downloaded documents use attachment disposition and no-store caching. PDFs and images are sent to Gemini for extraction when configured. Extracted text and query content are sent for semantic matching. Rendered messages are sent only to the configured communication providers.
-- Uploaded instructions are treated as untrusted document data. All-readability checks and exact evidence validation reduce unsupported matches. LLM accuracy still needs evaluation against the supplied assessment corpus; an exact citation does not prove clinical correctness.
-- Historical responses are immutable once accepted, delivered or uncertain. Reanalysis before submission uses the current locker. Review cases do not auto-send, to avoid requesting the wrong documents.
-- This implementation does not claim regulatory certification, universal OCR accuracy, guaranteed WhatsApp acceptance, or tested real delivery without credentials. Set operational retention, provider agreements and deployment policy before using actual patient data.
+This code migration does not transfer a previously hosted D1 database or R2 files automatically. The previous source remains in Git history at commit `004ca05`.
 
-## Tests
+For an existing deployment, take a backup and perform a separately verified data migration before switching traffic:
 
-```powershell
-node --test tests/domain.test.mjs tests/providers.test.mjs
-npx tsc --noEmit
-npm run build
-# With a local development server running:
-node tests/api-smoke.mjs
-```
+1. Export D1 records and jobs and copy R2 originals to the private Supabase bucket.
+2. Create the corresponding Supabase users and map old Sites owner IDs to their new verified user IDs.
+3. Rewrite `owner` columns and object-key prefixes consistently; preserve record IDs, fingerprints, job states, and provider IDs.
+4. Restore into a staging database first. An imported database without Drizzle's migration journal needs baselining rather than replaying the table-creation migrations.
+5. Verify per-account isolation, original downloads, query history, and delivery states before directing users to Vercel. Never reset accepted or uncertain jobs to queued during migration.
 
-The provider tests use SQLite and mocked external APIs to exercise the real server processing functions. They verify two-channel automatic submission, independent channel outcomes, evidence checks, existing-document exclusion, consent gates, retry handling, and account isolation. They do not contact real recipients. The API smoke test uploads a synthetic query to the local preview, verifies persistence/deduplication, download authorization, CSRF checks, and validation. Browser visual verification was unavailable in the authoring environment.
+No remote credentials or existing production data were supplied with the repository. Remote migration, real provider delivery, and hosted end-to-end verification require the configured accounts.
 
-Provider contracts: [Gemini document processing](https://ai.google.dev/gemini-api/docs/document-processing), [Twilio Messages API](https://www.twilio.com/docs/messaging/api/message-resource), [Resend idempotency](https://resend.com/docs/dashboard/emails/idempotency-keys).
+## Checks and limits
+
+`npm run check` verifies TypeScript, formatting, domain behavior, mocked delivery, the actual libSQL adapter/migrations, and API authorization boundaries. `npm run build` produces the native Next.js deployment. `npm run test:smoke` additionally exercises a local running app with a real dedicated Supabase test account.
+
+No regulatory certification, universal OCR accuracy, or guaranteed provider delivery is claimed. Retention, provider agreements, backup policy, and operational access controls require deployment-specific decisions before using real patient data. Failed or abandoned direct uploads may leave unreferenced private objects; audit them before any retention cleanup.
