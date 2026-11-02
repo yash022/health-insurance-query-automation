@@ -35,6 +35,7 @@ yarn-error.log*
 # Checkout-local tool state
 /.wrangler/
 /.sites-runtime/
+/.vercel/
 
 # Workspace scaffolding and publication archives
 /.agents/
@@ -44,3 +45,5 @@ yarn-error.log*
 
 # OS metadata
 .DS_Store
+Thumbs.db
+Desktop.ini

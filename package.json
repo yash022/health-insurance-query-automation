@@ -1,9 +1,9 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "carefi-patient-locker",
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=24.0.0 <25"
   },
   "scripts": {
     "install:ci": "node scripts/install-ci.mjs",
@@ -11,7 +11,13 @@
     "build": "node scripts/run-framework.mjs build",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test": "node --test tests/domain.test.mjs tests/providers.test.mjs",
+    "test:smoke": "node tests/api-smoke.mjs",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write app lib/domain.ts lib/server.ts tests worker/index.ts README.md PRODUCT.md package.json",
+    "format:check": "prettier --check app lib/domain.ts lib/server.ts tests worker/index.ts README.md PRODUCT.md package.json",
+    "check": "npm run typecheck && npm test && npm run format:check"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -52,6 +58,7 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.4",
     "json-rpc-2.0": "1.7.1",
+    "prettier": "3.6.2",
     "raw-body": "3.0.2",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
@@ -66,5 +73,6 @@
     "miniflare": {
       "sharp": "0.35.4"
     }
-  }
+  },
+  "description": "Patient document management, insurer query analysis, and consent-aware patient communications."
 }

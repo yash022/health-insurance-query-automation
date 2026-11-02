@@ -22,14 +22,14 @@ The first visit creates 10 clearly fictional profiles, 35 text documents and fou
 
 Copy `.dev.vars.example` to `.dev.vars` for local development. For hosting, set the same keys as server-side Site environment variables. Secrets are never exposed by `/api/state` or stored in browser storage. Restart local development after changing environment variables.
 
-| Service | Required configuration | Behavior |
-| --- | --- | --- |
-| Gemini | GEMINI_API_KEY; optional GEMINI_MODEL | Transcribes PDFs/images, decomposes all requests, and compares actual document text. TXT uploads are extracted without an external provider. |
-| Resend | RESEND_API_KEY, EMAIL_FROM | Sends plain-text email; sender must be verified by the provider. Uses a stable per-job idempotency key. |
-| Twilio | TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM | Sends WhatsApp messages through the Messages API. Sandbox recipients must first join your sandbox. |
-| WhatsApp template | TWILIO_CONTENT_SID | Optional approved template with variable `1` containing the rendered message. Configure an approved template for business-initiated messages outside the customer-service window; WhatsApp/provider restrictions still apply. |
-| Evaluation contacts | TEST_EMAIL, TEST_WHATSAPP | Override destinations with your actual test inbox and joined/approved WhatsApp number. Phone numbers must be E.164, e.g. +919876543210. |
-| Scheduler | CRON_SECRET | Authenticates the maintenance endpoint described below. |
+| Service             | Required configuration                                      | Behavior                                                                                                                                                                                                                      |
+| ------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gemini              | GEMINI_API_KEY; optional GEMINI_MODEL                       | Transcribes PDFs/images, decomposes all requests, and compares actual document text. TXT uploads are extracted without an external provider.                                                                                  |
+| Resend              | RESEND_API_KEY, EMAIL_FROM                                  | Sends plain-text email; sender must be verified by the provider. Uses a stable per-job idempotency key.                                                                                                                       |
+| Twilio              | TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM | Sends WhatsApp messages through the Messages API. Sandbox recipients must first join your sandbox.                                                                                                                            |
+| WhatsApp template   | TWILIO_CONTENT_SID                                          | Optional approved template with variable `1` containing the rendered message. Configure an approved template for business-initiated messages outside the customer-service window; WhatsApp/provider restrictions still apply. |
+| Evaluation contacts | TEST_EMAIL, TEST_WHATSAPP                                   | Override destinations with your actual test inbox and joined/approved WhatsApp number. Phone numbers must be E.164, e.g. +919876543210.                                                                                       |
+| Scheduler           | CRON_SECRET                                                 | Authenticates the maintenance endpoint described below.                                                                                                                                                                       |
 
 Without Gemini, the app shows conservative candidate matching and `Analysis setup needed`; it does not send guessed requests. Without delivery credentials, jobs remain blocked with the specific reason. These are setup states, not simulated success.
 
