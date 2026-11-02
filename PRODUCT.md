@@ -42,22 +42,22 @@ A lost WhatsApp acknowledgment is marked uncertain because the provider may alre
 
 The included cron runs once daily. This does not guarantee minute-level retries; configure a more frequent supported schedule for that behavior. If Vercel Deployment Protection is enabled, an external scheduler also needs the platform's approved protection-bypass mechanism. Do not put scheduler secrets in public URLs or client code.
 
-## Existing Cloudflare data
+## Existing database data
 
-This code migration does not transfer a previously hosted D1 database or R2 files automatically. The previous source remains in Git history at commit `004ca05`.
+This code migration does not copy existing D1/Turso records or R2 files automatically. The former Cloudflare and Turso versions remain in Git history. Fresh installations use the new PostgreSQL migrations only.
 
 For an existing deployment, take a backup and perform a separately verified data migration before switching traffic:
 
-1. Export D1 records and jobs and copy R2 originals to the private Supabase bucket.
+1. Export any existing D1/Turso records and jobs and copy R2 originals to the private Supabase bucket.
 2. Create the corresponding Supabase users and map old Sites owner IDs to their new verified user IDs.
 3. Rewrite `owner` columns and object-key prefixes consistently; preserve record IDs, fingerprints, job states, and provider IDs.
-4. Restore into a staging database first. An imported database without Drizzle's migration journal needs baselining rather than replaying the table-creation migrations.
+4. Restore into a staging database first. Initialize the new PostgreSQL schema with `npm run db:migrate`, then import rows into it. Do not run the old SQLite migration files against PostgreSQL.
 5. Verify per-account isolation, original downloads, query history, and delivery states before directing users to Vercel. Never reset accepted or uncertain jobs to queued during migration.
 
 No remote credentials or existing production data were supplied with the repository. Remote migration, real provider delivery, and hosted end-to-end verification require the configured accounts.
 
 ## Checks and limits
 
-`npm run check` verifies TypeScript, formatting, domain behavior, mocked delivery, the actual libSQL adapter/migrations, and API authorization boundaries. `npm run build` produces the native Next.js deployment. `npm run test:smoke` additionally exercises a local running app with a real dedicated Supabase test account.
+`npm run check` verifies TypeScript, formatting, domain behavior, mocked delivery, the PostgreSQL adapter/migrations on an embedded PostgreSQL engine (PGlite), including row-level security, and API authorization boundaries. `npm run build` produces the native Next.js deployment. `npm run test:smoke` additionally exercises a local running app with a real dedicated Supabase test account.
 
 No regulatory certification, universal OCR accuracy, or guaranteed provider delivery is claimed. Retention, provider agreements, backup policy, and operational access controls require deployment-specific decisions before using real patient data. Failed or abandoned direct uploads may leave unreferenced private objects; audit them before any retention cleanup.

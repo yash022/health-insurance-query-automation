@@ -1,37 +1,62 @@
-import { createClient, type Client, type InValue } from '@libsql/client';
+import { Pool } from 'pg';
 
-let client: Client | undefined;
+type Value = string | number | boolean | null;
+type QueryResult = { rows: Record<string, unknown>[]; rowCount: number | null };
+type Execute = (sql: string, args: Value[]) => Promise<QueryResult>;
+let pool: Pool | undefined;
+
 export function getDatabaseClient() {
-  if (!client) {
-    const url = process.env.TURSO_DATABASE_URL;
-    if (!url)
-      throw new Error('Configure TURSO_DATABASE_URL before using the locker.');
-    if (process.env.VERCEL && url.startsWith('file:')) {
-      throw new Error('Vercel requires a remote Turso database.');
-    }
-    client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+  if (!pool) {
+    const connectionString =
+      process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (!connectionString)
+      throw new Error(
+        'Configure DATABASE_URL with your Supabase transaction pooler connection string.',
+      );
+    pool = new Pool({
+      connectionString,
+      max: 1,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 10000,
+      ssl: { rejectUnauthorized: true },
+    });
+    pool.on('error', () => console.error('Database connection interrupted.'));
   }
-  return client;
+  return pool;
 }
 
-// Preserve the application's prepared-query interface while using remote libSQL.
-export const database = {
-  prepare(sql: string) {
-    const statement = (args: InValue[] = []) => ({
-      bind: (...values: InValue[]) => statement(values),
-      async all() {
-        const result = await getDatabaseClient().execute({ sql, args });
-        return { results: result.rows };
-      },
-      async first() {
-        const result = await getDatabaseClient().execute({ sql, args });
-        return result.rows[0] ?? null;
-      },
-      async run() {
-        const result = await getDatabaseClient().execute({ sql, args });
-        return { meta: { changes: result.rowsAffected } };
-      },
-    });
-    return statement();
-  },
-};
+// Application SQL uses positional markers. Preserve quoted SQL literals.
+export function parameters(sql: string) {
+  let index = 0;
+  return sql.replace(/'(?:''|[^'])*'|\?/g, (token) =>
+    token === '?' ? `$${++index}` : token,
+  );
+}
+
+export function createDatabase(execute: Execute) {
+  return {
+    prepare(sql: string) {
+      const query = parameters(sql);
+      const statement = (args: Value[] = []) => ({
+        bind: (...values: Value[]) => statement(values),
+        async all() {
+          return { results: (await execute(query, args)).rows };
+        },
+        async first() {
+          return (await execute(query, args)).rows[0] ?? null;
+        },
+        async run() {
+          return {
+            meta: { changes: (await execute(query, args)).rowCount ?? 0 },
+          };
+        },
+      });
+      return statement();
+    },
+  };
+}
+
+// No query name is supplied: pg uses unnamed statements compatible with transaction pooling.
+export const database = createDatabase((sql, args) =>
+  getDatabaseClient().query(sql, args),
+);

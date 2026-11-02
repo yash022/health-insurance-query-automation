@@ -17,14 +17,14 @@ A private workspace for patient documents, insurer query analysis, and patient f
 | ------------------ | ---------------------------------------------- |
 | Application        | Next.js 16 App Router, React 19, TypeScript    |
 | Interface          | Tailwind CSS 4, Lucide, reusable UI components |
-| Database           | Turso/libSQL, Drizzle migrations               |
+| Database           | Supabase PostgreSQL, Drizzle migrations        |
 | Identity and files | Supabase Auth, private Supabase Storage        |
 | Hosting            | Vercel Node.js Functions and Cron              |
 | Providers          | Gemini, Resend, Twilio WhatsApp                |
 
 ## Quick start
 
-Requires **Node.js 24**, a Turso database, and a Supabase project.
+Requires **Node.js 24**, a Supabase project (database, authentication, and storage).
 
 1. Install dependencies: `npm ci`.
 2. Copy `.env.example` to `.env.local` and configure the database and Supabase variables below.
@@ -33,14 +33,14 @@ Requires **Node.js 24**, a Turso database, and a Supabase project.
 5. Run `npm run dev`, open `http://localhost:3000`, and sign in.
 6. Choose **Load sample workspace** from the empty dashboard, or add a patient.
 
-There is no default password or authentication bypass. Each Supabase user gets an isolated workspace. For local database development, `TURSO_DATABASE_URL=file:local.db` also works; Vercel requires a remote database.
+There is no default password or authentication bypass. Each Supabase user gets an isolated workspace. No Turso account or credentials are needed.
 
 ## Configuration
 
 | Variable                                                          | Purpose                                                           |
 | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `TURSO_DATABASE_URL`                                              | Remote libSQL database URL                                        |
-| `TURSO_AUTH_TOKEN`                                                | Server-side database token                                        |
+| `DATABASE_URL` (or `POSTGRES_URL`)                                | Supabase transaction pooler connection string; server-only        |
+| `DIRECT_URL`                                                      | Optional Supabase direct/session connection for migrations        |
 | `NEXT_PUBLIC_SUPABASE_URL`                                        | Supabase project URL                                              |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY`                                   | Public Supabase anon key for authentication and signed uploads    |
 | `SUPABASE_SERVICE_ROLE_KEY`                                       | Server-only storage access; never expose in client variables      |
@@ -53,6 +53,14 @@ There is no default password or authentication bypass. Each Supabase user gets a
 | `TEST_EMAIL`, `TEST_WHATSAPP`                                     | Evaluation recipients; required for fictional profiles            |
 
 Provider credentials are optional for browsing. Without Gemini, analysis is marked as requiring setup; missing delivery credentials block jobs rather than simulating success. TXT extraction works without Gemini.
+
+## Supabase database connection
+
+In Supabase, open **Connect ? Transaction pooler** and copy the PostgreSQL URI into Vercel's Production `DATABASE_URL` variable. Replace the password placeholder with the project's database password (URL-encode special characters). This is a database connection string, not an anon or service-role API key. If the Vercel integration already provides `POSTGRES_URL`, the app accepts it automatically. Do not expose either variable with a `NEXT_PUBLIC_` prefix.
+
+For migrations, optionally set `DIRECT_URL` to the same project's direct or session-pooler URI. The app uses one connection per warm function, TLS, and unnamed parameterized queries compatible with transaction pooling.
+
+The schema enables row-level security without browser-access policies. Database access happens through authenticated server routes using the server-only database connection; never add public access policies to these tables.
 
 ## Deploy on Vercel
 
@@ -88,7 +96,7 @@ GitHub Actions runs `check` and the native Next.js build. Automated provider tes
 app/                 Login, portal UI, API handlers, cron endpoint
 components/ui/       Reusable UI components
 lib/auth.ts          Server-verified Supabase identity
-lib/database.ts      Prepared-query adapter for libSQL
+lib/database.ts      Parameterized PostgreSQL adapter
 lib/storage.ts       Private storage and signed URLs
 lib/domain.ts        Classification, evidence validation, message rendering
 lib/server.ts        Analysis, records, and delivery orchestration
@@ -99,4 +107,4 @@ tests/               Domain, provider, API, and database checks
 
 See [PRODUCT.md](PRODUCT.md) for evaluation, runtime behavior, and existing-data migration notes.
 
-References: [Supabase SSR](https://supabase.com/docs/guides/auth/server-side), [Turso TypeScript SDK](https://docs.turso.tech/sdk/ts/reference), [Vercel limits](https://vercel.com/docs/functions/limitations), [Vercel Cron](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+References: [Supabase SSR](https://supabase.com/docs/guides/auth/server-side), [Supabase database connections](https://supabase.com/docs/guides/database/connecting-to-postgres), [Vercel limits](https://vercel.com/docs/functions/limitations), [Vercel Cron](https://vercel.com/docs/cron-jobs/manage-cron-jobs).

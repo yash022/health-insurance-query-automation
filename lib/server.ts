@@ -257,7 +257,7 @@ export async function processQuery(owner: string, q: any) {
         };
         await db()
           .prepare(
-            'INSERT OR IGNORE INTO jobs(id,owner,query,channel,status,data) VALUES(?,?,?,?,?,?)',
+            'INSERT INTO jobs(id,owner,query,channel,status,data) VALUES(?,?,?,?,?,?) ON CONFLICT(query,channel) DO NOTHING',
           )
           .bind(uid(), owner, q.id, channel, 'queued', JSON.stringify(payload))
           .run();
@@ -287,7 +287,7 @@ export async function processQuery(owner: string, q: any) {
 }
 export async function messages(owner: string) {
   const result = await db()
-    .prepare('SELECT * FROM jobs WHERE owner=? ORDER BY rowid DESC')
+    .prepare('SELECT * FROM jobs WHERE owner=? ORDER BY sequence DESC')
     .bind(owner)
     .all();
   return result.results.map((r: any) => ({
@@ -520,14 +520,14 @@ export async function tick() {
   if (E().GEMINI_API_KEY) {
     const pending = await db()
       .prepare(
-        "SELECT * FROM records WHERE kind='query' AND (json_extract(data,'$.status')='awaiting_setup' OR (json_extract(data,'$.status')='processing' AND created<?)) LIMIT 1",
+        "SELECT * FROM records WHERE kind='query' AND ((data::jsonb->>'status')='awaiting_setup' OR ((data::jsonb->>'status')='processing' AND created<?)) LIMIT 1",
       )
       .bind(new Date(Date.now() - 300000).toISOString())
       .all();
     for (const row of pending.results as any[]) {
       const locked = await db()
         .prepare(
-          "UPDATE records SET data=json_set(data,'$.status','processing'),created=? WHERE id=? AND data=?",
+          "UPDATE records SET data=jsonb_set(data::jsonb,'{status}','\"processing\"'::jsonb)::text,created=? WHERE id=? AND data=?",
         )
         .bind(now(), row.id, row.data)
         .run();

@@ -1,15 +1,22 @@
-import { createClient } from '@libsql/client';
-import { drizzle } from 'drizzle-orm/libsql';
-import { migrate } from 'drizzle-orm/libsql/migrator';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 
-if (!process.env.TURSO_DATABASE_URL) throw new Error('Set TURSO_DATABASE_URL.');
-const client = createClient({
-  url: process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
+const connectionString =
+  process.env.DIRECT_URL ||
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL;
+if (!connectionString)
+  throw new Error('Set DATABASE_URL to your Supabase connection string.');
+const client = new Pool({
+  connectionString,
+  max: 1,
+  ssl: { rejectUnauthorized: true },
+  connectionTimeoutMillis: 10000,
 });
 try {
   await migrate(drizzle(client), { migrationsFolder: './drizzle' });
-  console.log('Database migrations applied.');
+  console.log('Supabase PostgreSQL migrations applied.');
 } finally {
-  client.close();
+  await client.end();
 }

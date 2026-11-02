@@ -2,31 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
-import { DatabaseSync } from 'node:sqlite';
-const sqlite = new DatabaseSync(':memory:');
-sqlite.exec(
-  'CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,kind TEXT,patient TEXT,fingerprint TEXT,data TEXT,created TEXT);CREATE TABLE jobs(id TEXT PRIMARY KEY,owner TEXT,query TEXT,channel TEXT,status TEXT,attempts INTEGER DEFAULT 0,next INTEGER DEFAULT 0,data TEXT,UNIQUE(query,channel));',
-);
-const DB = {
-  prepare(sql) {
-    return {
-      bind(...args) {
-        return {
-          async run() {
-            const r = sqlite.prepare(sql).run(...args);
-            return { meta: { changes: Number(r.changes) } };
-          },
-          async first() {
-            return sqlite.prepare(sql).get(...args);
-          },
-          async all() {
-            return { results: sqlite.prepare(sql).all(...args) };
-          },
-        };
-      },
-    };
-  },
-};
+import { after } from 'node:test';
+import { createTestDatabase } from './postgres-helper.mjs';
+const { postgres, database: DB } = await createTestDatabase();
+after(() => postgres.close());
 globalThis.__careEnv = {
   DB,
   GEMINI_API_KEY: 'mock',
@@ -165,6 +144,13 @@ test('upload processing automatically creates and submits exactly two channels w
   );
   await server.drain('owner-a');
   assert.equal(deliveries.length, 2, 'Submitted jobs are never resent');
+  await server.processQuery('owner-a', q);
+  assert.equal(
+    (await server.messages('owner-a')).length,
+    2,
+    'PostgreSQL conflict handling prevents duplicate channel jobs',
+  );
+  assert.equal(deliveries.length, 2);
   await server.refreshDelivery('owner-a');
   assert.ok(
     (await server.messages('owner-a')).every((m) => m.status === 'delivered'),
@@ -173,7 +159,7 @@ test('upload processing automatically creates and submits exactly two channels w
   assert.equal((await server.messages('foreign')).length, 0);
 });
 test('missing consent blocks both channels without contacting providers', async () => {
-  sqlite.exec("DELETE FROM records WHERE id='doc'");
+  await postgres.exec("DELETE FROM records WHERE id='doc'");
   const { q } = await fixture('owner-b', false);
   const count = deliveries.length;
   await server.processQuery('owner-b', q);
@@ -186,7 +172,7 @@ test('missing consent blocks both channels without contacting providers', async 
 });
 test('WhatsApp timeout is uncertain, never blindly retried; email independently succeeds', async () => {
   mode = 'timeout';
-  sqlite.exec("DELETE FROM records WHERE id='doc'");
+  await postgres.exec("DELETE FROM records WHERE id='doc'");
   const { q } = await fixture('owner-c');
   await server.processQuery('owner-c', q);
   const m = await server.messages('owner-c');
@@ -198,7 +184,7 @@ test('WhatsApp timeout is uncertain, never blindly retried; email independently 
 });
 test('provider rate limiting schedules a bounded retry without marking sent', async () => {
   mode = 'rate-limit';
-  sqlite.exec("DELETE FROM records WHERE id='doc'");
+  await postgres.exec("DELETE FROM records WHERE id='doc'");
   const { q } = await fixture('owner-d');
   await server.processQuery('owner-d', q);
   assert.ok(

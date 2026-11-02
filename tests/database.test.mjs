@@ -1,15 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drizzle } from 'drizzle-orm/libsql';
-import { migrate } from 'drizzle-orm/libsql/migrator';
+import { createTestDatabase } from './postgres-helper.mjs';
+import { parameters } from '../lib/database.ts';
 
-test('libSQL adapter preserves migrations, isolation, unique uploads, and atomic job claims', async () => {
-  process.env.TURSO_DATABASE_URL = 'file::memory:';
-  const { database, getDatabaseClient } = await import('../lib/database.ts');
-  const client = getDatabaseClient();
+test('PostgreSQL adapter preserves migrations, isolation, unique uploads, and atomic job claims', async () => {
+  const { postgres, database, migrateDatabase } = await createTestDatabase();
   try {
-    await migrate(drizzle(client), { migrationsFolder: './drizzle' });
-    await migrate(drizzle(client), { migrationsFolder: './drizzle' });
+    await migrateDatabase();
+    await migrateDatabase();
     const insert =
       'INSERT INTO records(id,owner,kind,patient,fingerprint,data,created) VALUES(?,?,?,?,?,?,?)';
     await database
@@ -39,13 +37,13 @@ test('libSQL adapter preserves migrations, isolation, unique uploads, and atomic
     );
     await database
       .prepare(
-        "UPDATE records SET data=json_set(data,'$.status','processed') WHERE id=?",
+        "UPDATE records SET data=jsonb_set(data::jsonb,'{status}','\"processed\"'::jsonb)::text WHERE id=?",
       )
       .bind('r1')
       .run();
     const row = await database
       .prepare(
-        "SELECT json_extract(data,'$.status') AS status FROM records WHERE id=?",
+        "SELECT (data::jsonb->>'status') AS status FROM records WHERE id=?",
       )
       .bind('r1')
       .first();
@@ -69,7 +67,51 @@ test('libSQL adapter preserves migrations, isolation, unique uploads, and atomic
       (await database.prepare('SELECT * FROM jobs').all()).results.length,
       1,
     );
+    const next = Date.now() + 3600000;
+    await database
+      .prepare('UPDATE jobs SET next=? WHERE id=?')
+      .bind(next, 'j1')
+      .run();
+    assert.equal(
+      Number(
+        (
+          await database
+            .prepare('SELECT next FROM jobs WHERE id=?')
+            .bind('j1')
+            .first()
+        ).next,
+      ),
+      next,
+    );
+    // Supabase exposes public tables through its Data API: RLS must deny browser roles.
+    await postgres.exec(
+      'CREATE ROLE browser_user; GRANT USAGE ON SCHEMA public TO browser_user; GRANT SELECT, INSERT ON records, jobs TO browser_user; SET ROLE browser_user;',
+    );
+    try {
+      assert.equal(
+        (await postgres.query('SELECT * FROM records')).rows.length,
+        0,
+      );
+      assert.equal((await postgres.query('SELECT * FROM jobs')).rows.length, 0);
+      await assert.rejects(
+        postgres.query(
+          "INSERT INTO records(id,owner,kind,data,created) VALUES('forged','alice','patient','{}','2026-01-01')",
+        ),
+        /row-level security/,
+      );
+    } finally {
+      await postgres.exec('RESET ROLE');
+    }
   } finally {
-    client.close();
+    await postgres.close();
   }
+});
+
+test('SQL parameters preserve quoted question marks and remain positional', () => {
+  assert.equal(
+    parameters(
+      "SELECT '?' AS literal, 'it''s ?' AS escaped WHERE id=? AND owner=?",
+    ),
+    "SELECT '?' AS literal, 'it''s ?' AS escaped WHERE id=$1 AND owner=$2",
+  );
 });

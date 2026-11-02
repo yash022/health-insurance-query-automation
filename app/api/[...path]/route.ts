@@ -285,7 +285,7 @@ async function handle(req: Request) {
             'Messages already submitted or awaiting reconciliation. This query cannot be reprocessed.',
           );
         const lock = await (env as any).DB.prepare(
-          "UPDATE records SET data=json_set(data,'$.status','processing') WHERE owner=? AND id=? AND json_extract(data,'$.status')!='processing'",
+          "UPDATE records SET data=jsonb_set(data::jsonb,'{status}','\"processing\"'::jsonb)::text WHERE owner=? AND id=? AND (data::jsonb->>'status')!='processing'",
         )
           .bind(owner, q.id)
           .run();
